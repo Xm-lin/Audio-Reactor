@@ -2,10 +2,10 @@ import math
 import threading
 import tkinter as tk
 import numpy as np
-import soundcard as sc
 from scipy.ndimage import gaussian_filter1d
-import pystray
-from PIL import Image, ImageDraw
+
+import audio_core
+from tray_app import setup_tray
 
 # --- 初始化 Tkinter 視窗 ---
 root = tk.Tk()
@@ -31,7 +31,7 @@ canvas.pack(fill="both", expand=True)
 NUM_BARS = 60
 BAR_WIDTH = 4
 
-current_mode = 0  # 0: 圓形, 4: 橫向
+current_mode = 0
 target_mode = 0
 anim_progress = 1.0
 is_animating = False
@@ -39,12 +39,11 @@ prev_mode = 0
 
 anim_start_cx = cx
 anim_start_cy = cy
-
 sensitivity_factor = 14.0
 
 horiz_length = screen_w / 3
 horiz_start_x = (screen_w - horiz_length) / 2
-TOP_MARGIN = 0  # 橫向模式等化器頂端緊貼螢幕最上方
+TOP_MARGIN = 0
 
 def get_bar_coords(mode, index, bar_length):
     if mode == 0:
@@ -61,13 +60,11 @@ def get_bar_coords(mode, index, bar_length):
         y1 = TOP_MARGIN
         return x1, y1, x1, y1 + bar_length
 
-# 1. 圓形模式的中間黑色拖曳區
 drag_area_circle = canvas.create_oval(cx - 100, cy - 100, cx + 100, cy + 100, fill="#000002", outline="")
 canvas.itemconfigure(drag_area_circle, state="normal")
 
-# 2. 橫向模式的四向十字拖曳按鈕元件（距離螢幕最上方 5px）
-horiz_btn_offset_x = 18  # 距離起點（第一根音訊條）左側的距離
-horiz_btn_y = 17  # 讓按鈕頂部距離螢幕最上方約 5px (中心點 17 - 半徑 12 = 5)
+horiz_btn_offset_x = 18
+horiz_btn_y = 17
 
 horiz_drag_bg = canvas.create_oval(0, 0, 0, 0, fill="#1a1a1a", outline="#333333", width=1, state="hidden")
 horiz_arrow_up = canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
@@ -79,6 +76,9 @@ rectangles = [canvas.create_line(0, 0, 0, 0, width=BAR_WIDTH, fill="#00FF7F", ca
 
 is_running = True
 tray_icon = None
+
+def get_is_running():
+    return is_running
 
 def on_closing():
     global is_running
@@ -101,7 +101,6 @@ def update_horiz_drag_btn_coords():
     canvas.coords(horiz_arrow_left, hx, hy, hx - 7, hy)
     canvas.coords(horiz_arrow_right, hx, hy, hx + 7, hy)
 
-# --- 模式切換邏輯 ---
 def toggle_mode():
     global current_mode, target_mode, prev_mode, anim_progress, is_animating, anim_start_cx, anim_start_cy
     if is_animating: return
@@ -134,7 +133,10 @@ def set_sensitivity(value):
     global sensitivity_factor
     sensitivity_factor = value
 
-# --- 右鍵選單設定 ---
+def get_sensitivity():
+    return sensitivity_factor
+
+# --- 右鍵選單 ---
 context_menu = tk.Menu(root, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
 context_menu.add_command(label="切換顯示模式 (圓形 / 橫向)", command=toggle_mode)
 
@@ -154,51 +156,21 @@ def show_context_menu(event):
     finally:
         context_menu.grab_release()
 
-# 綁定滑鼠右鍵 (Windows/Linux 用 <Button-3>，Mac 可用 <Button-2>)
 canvas.bind("<Button-3>", show_context_menu)
 canvas.bind("<Button-2>", show_context_menu)
 
-# --- 系統匣控制邏輯 ---
-def tray_toggle_mode(icon, item):
-    toggle_mode()
-
-def tray_exit(icon, item):
-    root.after(0, on_closing)
-
-def setup_tray():
-    global tray_icon
-    image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-    dc = ImageDraw.Draw(image)
-    dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
-    
-    menu = pystray.Menu(
-        pystray.MenuItem("切換顯示模式 (圓形 / 橫向)", tray_toggle_mode),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("靈敏度設定", pystray.Menu(
-            pystray.MenuItem("低 (8.0)", lambda: set_sensitivity(8.0), checked=lambda item: sensitivity_factor == 8.0),
-            pystray.MenuItem("中 (14.0)", lambda: set_sensitivity(14.0), checked=lambda item: sensitivity_factor == 14.0),
-            pystray.MenuItem("高 (22.0)", lambda: set_sensitivity(22.0), checked=lambda item: sensitivity_factor == 22.0),
-            pystray.MenuItem("極高 (32.0)", lambda: set_sensitivity(32.0), checked=lambda item: sensitivity_factor == 32.0),
-        )),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("結束程式", tray_exit)
-    )
-    
-    tray_icon = pystray.Icon("FFT_Equalizer", image, "系統音訊等化器", menu)
-    tray_icon.run()
-
-threading.Thread(target=setup_tray, daemon=True).start()
+# 啟動系統匣
+tray_icon = setup_tray(toggle_mode, set_sensitivity, get_sensitivity, lambda: root.after(0, on_closing))
+threading.Thread(target=tray_icon.run, daemon=True).start()
 
 def animate_step():
     global anim_progress, current_mode, is_animating, cx, cy
     if anim_progress < 1.0:
         anim_progress = min(1.0, anim_progress + 0.06)
-        
         if target_mode == 0:
             cx = lerp(anim_start_cx, screen_w // 2, anim_progress)
             cy = lerp(anim_start_cy, screen_h // 2, anim_progress)
             canvas.coords(drag_area_circle, cx - 100, cy - 100, cx + 100, cy + 100)
-
         root.after(16, animate_step)
     else:
         current_mode = target_mode
@@ -209,7 +181,7 @@ def animate_step():
             canvas.itemconfigure(drag_area_circle, state="normal")
         is_animating = False
 
-# --- 視窗拖曳功能 ---
+# 視窗拖曳
 x_offset, y_offset = 0, 0
 is_dragging = False
 
@@ -241,7 +213,6 @@ def do_move(event):
             horiz_start_x += dx
             horiz_start_x = max(20, min(screen_w - horiz_length, horiz_start_x))
             update_horiz_drag_btn_coords()
-
         x_offset = event.x
         y_offset = event.y
 
@@ -253,37 +224,17 @@ canvas.bind("<Button-1>", start_move)
 canvas.bind("<B1-Motion>", do_move)
 canvas.bind("<ButtonRelease-1>", stop_move)
 
-# --- SoundCard 音訊擷取 ---
-SAMPLE_RATE = 44100
-BLOCK_SIZE = 2048
+# 啟動音訊執行緒
+threading.Thread(target=audio_core.capture_audio_thread, args=(get_is_running,), daemon=True).start()
+
 fft_smooth = np.zeros(NUM_BARS)
-audio_buffer = np.zeros(BLOCK_SIZE)
-
-def capture_audio_thread():
-    global audio_buffer, is_running
-    while is_running:
-        try:
-            speaker = sc.default_speaker()
-            m_mic = sc.get_microphone(id=speaker.id, include_loopback=True)
-            with m_mic.recorder(samplerate=SAMPLE_RATE, channels=1) as temp_recorder:
-                while is_running:
-                    current_speaker = sc.default_speaker()
-                    if current_speaker.id != speaker.id:
-                        break
-                    data = temp_recorder.record(numframes=BLOCK_SIZE)
-                    audio_buffer = data[:, 0]
-        except Exception:
-            import time
-            time.sleep(1.0)
-
-threading.Thread(target=capture_audio_thread, daemon=True).start()
 
 def update_ui():
     global fft_smooth
 
-    windowed = audio_buffer * np.hanning(len(audio_buffer))
+    windowed = audio_core.audio_buffer * np.hanning(len(audio_core.audio_buffer))
     fft_data = np.abs(np.fft.rfft(windowed))
-    freqs = np.fft.rfftfreq(len(audio_buffer), 1.0 / SAMPLE_RATE)
+    freqs = np.fft.rfftfreq(len(audio_core.audio_buffer), 1.0 / audio_core.SAMPLE_RATE)
     freq_points = np.logspace(np.log10(20.0), np.log10(15000.0), NUM_BARS + 1)
 
     raw_bars = np.zeros(NUM_BARS)
