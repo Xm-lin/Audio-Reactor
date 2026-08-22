@@ -28,5 +28,5 @@ If you want to run or modify the source code locally:
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/YourUsername/YourRepositoryName.git](https://github.com/YourUsername/YourRepositoryName.git)
+git clone [https://github.com/Xm-lin/Audio-Reactor.git](https://github.com/Xm-lin/Audio-Reactor.git)
 cd YourRepositoryName
