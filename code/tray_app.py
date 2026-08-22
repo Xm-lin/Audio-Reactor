@@ -1,7 +1,7 @@
 import pystray
 from PIL import Image, ImageDraw
 
-def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, exit_cb):
+def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, exit_cb):
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
@@ -14,6 +14,11 @@ def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, exit_cb):
             pystray.MenuItem("中 (14.0)", lambda: set_sens_cb(14.0), checked=lambda item: get_sens_cb() == 14.0),
             pystray.MenuItem("高 (22.0)", lambda: set_sens_cb(22.0), checked=lambda item: get_sens_cb() == 22.0),
             pystray.MenuItem("極高 (32.0)", lambda: set_sens_cb(32.0), checked=lambda item: get_sens_cb() == 32.0),
+        )),
+        pystray.MenuItem("主題風格", pystray.Menu(
+            pystray.MenuItem("霓虹綠 (Classic)", lambda: set_theme_cb("green"), checked=lambda item: get_theme_cb() == "green"),
+            pystray.MenuItem("電競藍 (Cyber)", lambda: set_theme_cb("cyan"), checked=lambda item: get_theme_cb() == "cyan"),
+            pystray.MenuItem("日落橘 (Sunset)", lambda: set_theme_cb("orange"), checked=lambda item: get_theme_cb() == "orange"),
         )),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("結束程式", lambda icon, item: exit_cb())

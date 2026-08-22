@@ -40,6 +40,7 @@ prev_mode = 0
 anim_start_cx = cx
 anim_start_cy = cy
 sensitivity_factor = 14.0
+current_theme = "green"  # 預設主題：green, cyan, orange
 
 horiz_length = screen_w / 3
 horiz_start_x = (screen_w - horiz_length) / 2
@@ -136,6 +137,13 @@ def set_sensitivity(value):
 def get_sensitivity():
     return sensitivity_factor
 
+def set_theme(theme_name):
+    global current_theme
+    current_theme = theme_name
+
+def get_theme():
+    return current_theme
+
 # --- 右鍵選單 ---
 context_menu = tk.Menu(root, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
 context_menu.add_command(label="切換顯示模式 (圓形 / 橫向)", command=toggle_mode)
@@ -146,6 +154,12 @@ sens_menu.add_command(label="中 (14.0)", command=lambda: set_sensitivity(14.0))
 sens_menu.add_command(label="高 (22.0)", command=lambda: set_sensitivity(22.0))
 sens_menu.add_command(label="極高 (32.0)", command=lambda: set_sensitivity(32.0))
 context_menu.add_cascade(label="靈敏度設定", menu=sens_menu)
+
+theme_menu = tk.Menu(context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+theme_menu.add_command(label="霓虹綠 (Classic)", command=lambda: set_theme("green"))
+theme_menu.add_command(label="電競藍 (Cyber)", command=lambda: set_theme("cyan"))
+theme_menu.add_command(label="日落橘 (Sunset)", command=lambda: set_theme("orange"))
+context_menu.add_cascade(label="主題風格", menu=theme_menu)
 
 context_menu.add_separator()
 context_menu.add_command(label="結束程式", command=on_closing)
@@ -160,7 +174,14 @@ canvas.bind("<Button-3>", show_context_menu)
 canvas.bind("<Button-2>", show_context_menu)
 
 # 啟動系統匣
-tray_icon = setup_tray(toggle_mode, set_sensitivity, get_sensitivity, lambda: root.after(0, on_closing))
+tray_icon = setup_tray(
+    toggle_mode, 
+    set_sensitivity, 
+    get_sensitivity, 
+    set_theme, 
+    get_theme, 
+    lambda: root.after(0, on_closing)
+)
 threading.Thread(target=tray_icon.run, daemon=True).start()
 
 def animate_step():
@@ -253,9 +274,19 @@ def update_ui():
         val = fft_smooth[index]
         bar_len = min(130, np.cbrt(val) * sensitivity_factor)
 
-        r = int(min(255, val * 10 + (index / NUM_BARS) * 180))
-        g = int(max(0, 255 - val * 10 - (index / NUM_BARS) * 120))
-        b = int(min(255, 120 + (index / NUM_BARS) * 135))
+        # 根據目前主題計算顏色
+        if current_theme == "green":
+            r = int(min(255, val * 10 + (index / NUM_BARS) * 180))
+            g = int(max(0, 255 - val * 10 - (index / NUM_BARS) * 120))
+            b = int(min(255, 120 + (index / NUM_BARS) * 135))
+        elif current_theme == "cyan":
+            r = int(max(0, 50 - val * 5))
+            g = int(min(255, 150 + val * 8 + (index / NUM_BARS) * 100))
+            b = int(min(255, 200 + val * 5))
+        elif current_theme == "orange":
+            r = int(min(255, 200 + val * 10))
+            g = int(min(255, 100 + val * 5 + (index / NUM_BARS) * 100))
+            b = int(max(0, 50 - val * 5))
 
         x1_old, y1_old, x2_old, y2_old = get_bar_coords(prev_mode, index, bar_len)
         x1_new, y1_new, x2_new, y2_new = get_bar_coords(target_mode, index, bar_len)
