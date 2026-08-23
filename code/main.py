@@ -144,6 +144,12 @@ def set_theme(theme_name):
 def get_theme():
     return current_theme
 
+def set_audio_source(source_type):
+    audio_core.set_audio_source(source_type)
+
+def get_audio_source():
+    return audio_core.get_audio_source()
+
 # --- 右鍵選單 ---
 context_menu = tk.Menu(root, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
 context_menu.add_command(label="切換顯示模式 (圓形 / 橫向)", command=toggle_mode)
@@ -160,6 +166,12 @@ theme_menu.add_command(label="霓虹綠 (Classic)", command=lambda: set_theme("g
 theme_menu.add_command(label="電競藍 (Cyber)", command=lambda: set_theme("cyan"))
 theme_menu.add_command(label="日落橘 (Sunset)", command=lambda: set_theme("orange"))
 context_menu.add_cascade(label="主題風格", menu=theme_menu)
+
+source_menu = tk.Menu(context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+source_menu.add_command(label="僅系統聲音 (System)", command=lambda: set_audio_source("system"))
+source_menu.add_command(label="僅麥克風 (Mic)", command=lambda: set_audio_source("mic"))
+source_menu.add_command(label="混合模式 (Mic & System)", command=lambda: set_audio_source("both"))
+context_menu.add_cascade(label="音源選擇", menu=source_menu)
 
 context_menu.add_separator()
 context_menu.add_command(label="結束程式", command=on_closing)
@@ -180,6 +192,8 @@ tray_icon = setup_tray(
     get_sensitivity, 
     set_theme, 
     get_theme, 
+    set_audio_source,
+    get_audio_source,
     lambda: root.after(0, on_closing)
 )
 threading.Thread(target=tray_icon.run, daemon=True).start()

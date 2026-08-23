@@ -4,3 +4,4 @@ dist/
 *.exe
 __pycache__/
 .vscode/
+build.py

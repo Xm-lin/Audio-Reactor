@@ -1,7 +1,8 @@
 import pystray
 from PIL import Image, ImageDraw
 
-def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, exit_cb):
+def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, set_source_cb, get_source_cb, exit_cb):
+    # ... (前面的圖示設定省略)
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
@@ -19,6 +20,11 @@ def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme
             pystray.MenuItem("霓虹綠 (Classic)", lambda: set_theme_cb("green"), checked=lambda item: get_theme_cb() == "green"),
             pystray.MenuItem("電競藍 (Cyber)", lambda: set_theme_cb("cyan"), checked=lambda item: get_theme_cb() == "cyan"),
             pystray.MenuItem("日落橘 (Sunset)", lambda: set_theme_cb("orange"), checked=lambda item: get_theme_cb() == "orange"),
+        )),
+        pystray.MenuItem("音源選擇", pystray.Menu(
+            pystray.MenuItem("僅系統聲音 (System)", lambda: set_source_cb("system"), checked=lambda item: get_source_cb() == "system"),
+            pystray.MenuItem("僅麥克風 (Mic)", lambda: set_source_cb("mic"), checked=lambda item: get_source_cb() == "mic"),
+            pystray.MenuItem("混合模式 (Mic & System)", lambda: set_source_cb("both"), checked=lambda item: get_source_cb() == "both"),
         )),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("結束程式", lambda icon, item: exit_cb())
