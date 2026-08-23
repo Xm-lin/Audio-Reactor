@@ -2,7 +2,6 @@ import pystray
 from PIL import Image, ImageDraw
 
 def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, set_source_cb, get_source_cb, exit_cb):
-    # ... (前面的圖示設定省略)
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
