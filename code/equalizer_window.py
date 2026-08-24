@@ -174,7 +174,6 @@ class EqualizerWindow:
         self.drag_area_circle = self.canvas.create_oval(cx - 100, cy - 100, cx + 100, cy + 100, fill="#111111", outline="", width=0)
         self.album_image_id = self.canvas.create_image(cx, cy, state="hidden")
         
-        # 修正：將字型改為 "Microsoft JhengHei" 以防粉圓字型在系統找不到而失效，並賦予預設文字確保能正常顯示
         self.title_text_id = self.canvas.create_text(cx, cy + 33, text="播放器準備就緒...", fill="#ffffff", font=("Microsoft JhengHei", 10, "bold"), state="hidden")
 
         self.btn_prev_text   = self.canvas.create_text(cx - 33, cy + 55, text="⏮", fill="#aaaaaa", font=("Arial", 12), state="normal")
@@ -182,7 +181,6 @@ class EqualizerWindow:
         self.btn_next_text   = self.canvas.create_text(cx + 37, cy + 55, text="⏭", fill="#aaaaaa", font=("Arial", 12), state="normal")
 
         self.tooltip_bg = self.canvas.create_rectangle(0, 0, 0, 0, fill="#222222", outline="#555555", state="hidden")
-        # 提示框文字也一併更換為安全字型
         self.tooltip_text = self.canvas.create_text(0, 0, text="", fill="#ffffff", font=("Microsoft JhengHei", 9), state="hidden")
 
         self.horiz_btn_offset_x = 18
@@ -205,7 +203,6 @@ class EqualizerWindow:
             for _ in range(self.NUM_SIDE_BARS)
         ]
         
-        # 根據啟動時的模式調整介面可見性
         if self.current_mode in [4, 5]:
             self.canvas.itemconfigure(self.drag_area_circle, state="hidden")
             self.canvas.itemconfigure(self.album_image_id, state="hidden")
@@ -220,6 +217,11 @@ class EqualizerWindow:
                 self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
+                # 確保初始化在 4 模式時隱藏側邊條
+                for rid in self.left_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="hidden")
+                for rid in self.right_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="hidden")
             elif self.current_mode == 5:
                 for rid in self.left_side_rectangles:
                     self.canvas.itemconfigure(rid, state="normal")
@@ -252,7 +254,7 @@ class EqualizerWindow:
             mode_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             modes = [("圓形互動模式", 0), ("橫向頂部模式", 4), ("左右側邊雙聲道模式", 5)]
             for name, val in modes:
-                label_text = f"{name}    ✓" if self.current_mode == val else name
+                label_text = f"{name}    ✓" if self.target_mode == val else name
                 mode_menu.add_command(label=label_text, command=lambda v=val: self.set_mode(v))
             self.context_menu.add_cascade(label="顯示模式", menu=mode_menu)
 
@@ -327,9 +329,7 @@ class EqualizerWindow:
         if self.is_animating or self.current_mode == mode: 
             return
         
-        # 立即更新當前模式狀態，確保系統匣與右鍵選單能同步抓到正確打勾狀態
         self.prev_mode = self.current_mode
-        self.current_mode = mode  # <--- 將這一行移到這裡，點擊後立即生效
         self.target_mode = mode
 
         self.anim_progress = 0.0
@@ -355,6 +355,11 @@ class EqualizerWindow:
                 self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
+                # 確保切到橫向模式時，強制隱藏左右側邊條
+                for rid in self.left_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="hidden")
+                for rid in self.right_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="hidden")
             else:
                 self.canvas.itemconfigure(self.horiz_drag_bg, state="hidden")
                 self.canvas.itemconfigure(self.horiz_arrow_up, state="hidden")
@@ -693,7 +698,6 @@ class EqualizerWindow:
                 
             self.canvas.itemconfigure(self.title_text_id, state="normal")
         elif self.current_mode == 0 and not self.full_title:
-            # 當還沒抓到歌名時，顯示預設提示
             self.canvas.itemconfig(self.title_text_id, text="等待播放音樂...")
             self.canvas.itemconfigure(self.title_text_id, state="normal")
         else:
