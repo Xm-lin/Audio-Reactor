@@ -1,12 +1,9 @@
-import math
 import threading
 import warnings
 import tkinter as tk
-import numpy as np
-from scipy.ndimage import gaussian_filter1d
 
 import audio_core
-import media_core
+from equalizer_window import EqualizerWindow
 from tray_app import setup_tray
 
 # 濾除 soundcard 的資料斷訊警告
@@ -23,9 +20,6 @@ root.title("雙模式系統音訊 FFT 等化器")
 screen_w = root.winfo_screenwidth()
 screen_h = root.winfo_screenheight()
 
-cx = screen_w // 2
-cy = screen_h // 2
-
 root.geometry(f"{screen_w}x{screen_h}+0+0")
 root.overrideredirect(True)
 
@@ -33,81 +27,6 @@ TRANS_COLOR = "#000001"
 root.configure(bg=TRANS_COLOR)
 root.wm_attributes("-transparentcolor", TRANS_COLOR)
 root.wm_attributes("-topmost", True)
-
-canvas = tk.Canvas(root, bg=TRANS_COLOR, highlightthickness=0)
-canvas.pack(fill="both", expand=True)
-
-NUM_BARS = 60
-BAR_WIDTH = 4
-
-current_mode = 0
-target_mode = 0
-anim_progress = 1.0
-is_animating = False
-prev_mode = 0
-
-anim_start_cx = cx
-anim_start_cy = cy
-sensitivity_factor = 14.0
-current_theme = "green"
-
-is_playing = True
-
-horiz_length = screen_w / 3
-horiz_start_x = (screen_w - horiz_length) / 2
-TOP_MARGIN = 0
-
-def get_theme_hex():
-    if current_theme == "cyan":
-        return "#00E5FF"
-    elif current_theme == "orange":
-        return "#FFA500"
-    return "#00FF7F"
-
-# 檢查目前是否有音樂在播放（用音訊緩衝區的最大振幅判斷）
-def is_audio_active():
-    if audio_core.audio_buffer is not None and len(audio_core.audio_buffer) > 0:
-        return np.max(np.abs(audio_core.audio_buffer)) > 0.015
-    return False
-
-def get_bar_coords(mode, index, bar_length):
-    if mode == 0:
-        radius = 100
-        angle = (2 * math.pi / NUM_BARS) * index + (math.pi / 2)
-        x1 = cx + radius * math.cos(angle)
-        y1 = cy + radius * math.sin(angle)
-        x2 = cx + (radius + bar_length) * math.cos(angle)
-        y2 = cy + (radius + bar_length) * math.sin(angle)
-        return x1, y1, x2, y2
-    elif mode == 4:
-        spacing = horiz_length / NUM_BARS
-        x1 = horiz_start_x + index * spacing
-        y1 = TOP_MARGIN
-        return x1, y1, x1, y1 + bar_length
-
-drag_area_circle = canvas.create_oval(cx - 100, cy - 100, cx + 100, cy + 100, fill="#111111", outline="", width=0)
-canvas.itemconfigure(drag_area_circle, state="normal")
-
-album_image_id = canvas.create_image(cx, cy, state="hidden")
-
-# 控制按鈕 (向右調整 2px 修正置中偏移)
-btn_prev_text   = canvas.create_text(cx - 33, cy + 55, text="⏮", fill="#aaaaaa", font=("Arial", 12), state="normal")
-btn_toggle_text = canvas.create_text(cx + 2,  cy + 55, text="⏸", fill="#ffffff", font=("Arial", 14), state="normal")
-btn_next_text   = canvas.create_text(cx + 37, cy + 55, text="⏭", fill="#aaaaaa", font=("Arial", 12), state="normal")
-
-tooltip_bg = canvas.create_rectangle(0, 0, 0, 0, fill="#222222", outline="#555555", state="hidden")
-tooltip_text = canvas.create_text(0, 0, text="", fill="#ffffff", font=("Microsoft JhengHei", 9), state="hidden")
-
-horiz_btn_offset_x = 18
-horiz_btn_y = 17
-
-horiz_drag_bg = canvas.create_oval(0, 0, 0, 0, fill="#1a1a1a", outline="", width=0, state="hidden")
-horiz_arrow_up = canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-horiz_arrow_down = canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-horiz_arrow_left = canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-horiz_arrow_right = canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-
-rectangles = [canvas.create_line(0, 0, 0, 0, width=BAR_WIDTH, fill="#00FF7F", capstyle="round") for _ in range(NUM_BARS)]
 
 is_running = True
 tray_icon = None
@@ -123,347 +42,26 @@ def on_closing():
     root.quit()
     root.destroy()
 
-def lerp(a, b, t):
-    return a + (b - a) * t
-
-def update_horiz_drag_btn_coords():
-    hx = horiz_start_x - horiz_btn_offset_x
-    hy = horiz_btn_y
-    r = 12
-    canvas.coords(horiz_drag_bg, hx - r, hy - r, hx + r, hy + r)
-    canvas.coords(horiz_arrow_up, hx, hy, hx, hy - 7)
-    canvas.coords(horiz_arrow_down, hx, hy, hx, hy + 7)
-    canvas.coords(horiz_arrow_left, hx, hy, hx - 7, hy)
-    canvas.coords(horiz_arrow_right, hx, hy, hx + 7, hy)
-
-def toggle_mode():
-    global current_mode, target_mode, prev_mode, anim_progress, is_animating, anim_start_cx, anim_start_cy
-    if is_animating: return
-    prev_mode = current_mode
-    target_mode = 4 if current_mode == 0 else 0
-    anim_progress = 0.0
-    is_animating = True
-    
-    anim_start_cx = cx
-    anim_start_cy = cy
-    
-    if target_mode == 4:
-        canvas.itemconfigure(drag_area_circle, state="hidden")
-        canvas.itemconfigure(album_image_id, state="hidden")
-        canvas.itemconfigure(btn_prev_text, state="hidden")
-        canvas.itemconfigure(btn_toggle_text, state="hidden")
-        canvas.itemconfigure(btn_next_text, state="hidden")
-        canvas.itemconfigure(tooltip_bg, state="hidden")
-        canvas.itemconfigure(tooltip_text, state="hidden")
-        update_horiz_drag_btn_coords()
-        canvas.itemconfigure(horiz_drag_bg, state="normal")
-        canvas.itemconfigure(horiz_arrow_up, state="normal")
-        canvas.itemconfigure(horiz_arrow_down, state="normal")
-        canvas.itemconfigure(horiz_arrow_left, state="normal")
-        canvas.itemconfigure(horiz_arrow_right, state="normal")
-    else:
-        canvas.itemconfigure(horiz_drag_bg, state="hidden")
-        canvas.itemconfigure(horiz_arrow_up, state="hidden")
-        canvas.itemconfigure(horiz_arrow_down, state="hidden")
-        canvas.itemconfigure(horiz_arrow_left, state="hidden")
-        canvas.itemconfigure(horiz_arrow_right, state="hidden")
-
-    animate_step()
-
-def set_sensitivity(value):
-    global sensitivity_factor
-    sensitivity_factor = value
-
-def get_sensitivity():
-    return sensitivity_factor
-
-def set_theme(theme_name):
-    global current_theme
-    current_theme = theme_name
-    theme_color = get_theme_hex()
-    canvas.itemconfig(horiz_arrow_up, fill=theme_color)
-    canvas.itemconfig(horiz_arrow_down, fill=theme_color)
-    canvas.itemconfig(horiz_arrow_left, fill=theme_color)
-    canvas.itemconfig(horiz_arrow_right, fill=theme_color)
-
-def get_theme():
-    return current_theme
-
-def set_audio_source(source_type):
-    audio_core.set_audio_source(source_type)
-
-def get_audio_source():
-    return audio_core.get_audio_source()
-
-# --- 右鍵選單 ---
-context_menu = tk.Menu(root, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-context_menu.add_command(label="切換顯示模式 (圓形 / 橫向)", command=toggle_mode)
-
-sens_menu = tk.Menu(context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-sens_menu.add_command(label="低 (8.0)", command=lambda: set_sensitivity(8.0))
-sens_menu.add_command(label="中 (14.0)", command=lambda: set_sensitivity(14.0))
-sens_menu.add_command(label="高 (22.0)", command=lambda: set_sensitivity(22.0))
-sens_menu.add_command(label="極高 (32.0)", command=lambda: set_sensitivity(32.0))
-context_menu.add_cascade(label="靈敏度設定", menu=sens_menu)
-
-theme_menu = tk.Menu(context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-theme_menu.add_command(label="霓虹綠 (Classic)", command=lambda: set_theme("green"))
-theme_menu.add_command(label="電競藍 (Cyber)", command=lambda: set_theme("cyan"))
-theme_menu.add_command(label="日落橘 (Sunset)", command=lambda: set_theme("orange"))
-context_menu.add_cascade(label="主題風格", menu=theme_menu)
-
-source_menu = tk.Menu(context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-source_menu.add_command(label="僅系統聲音 (System)", command=lambda: set_audio_source("system"))
-source_menu.add_command(label="僅麥克風 (Mic)", command=lambda: set_audio_source("mic"))
-source_menu.add_command(label="混合模式 (Mic & System)", command=lambda: set_audio_source("both"))
-context_menu.add_cascade(label="音源選擇", menu=source_menu)
-
-context_menu.add_separator()
-context_menu.add_command(label="結束程式", command=on_closing)
-
-def show_context_menu(event):
-    try:
-        context_menu.tk_popup(event.x_root, event.y_root)
-    finally:
-        context_menu.grab_release()
-
-canvas.bind("<Button-3>", show_context_menu)
-canvas.bind("<Button-2>", show_context_menu)
+# 建立等化器 UI 核心物件
+eq_win = EqualizerWindow(root, screen_w, screen_h, on_closing)
 
 # 建立系統匣物件
 tray_icon = setup_tray(
-    toggle_mode_cb=toggle_mode,
-    set_sens_cb=set_sensitivity,
-    get_sens_cb=get_sensitivity,
-    set_theme_cb=set_theme,
-    get_theme_cb=get_theme,
-    set_source_cb=set_audio_source,
-    get_source_cb=get_audio_source,
+    toggle_mode_cb=eq_win.toggle_mode,
+    set_sens_cb=eq_win.set_sensitivity,
+    get_sens_cb=eq_win.get_sensitivity,
+    set_theme_cb=eq_win.set_theme,
+    get_theme_cb=eq_win.get_theme,
+    set_source_cb=eq_win.set_audio_source,
+    get_source_cb=eq_win.get_audio_source,
+    set_opacity_cb=eq_win.change_opacity,  # 新增這一行
+    get_opacity_cb=eq_win.get_opacity,    # 新增這一行
     exit_cb=lambda: root.after(0, on_closing)
 )
-
-def animate_step():
-    global anim_progress, current_mode, is_animating, cx, cy
-    if anim_progress < 1.0:
-        anim_progress = min(1.0, anim_progress + 0.06)
-        if target_mode == 0:
-            cx = lerp(anim_start_cx, screen_w // 2, anim_progress)
-            cy = lerp(anim_start_cy, screen_h // 2, anim_progress)
-            canvas.coords(drag_area_circle, cx - 100, cy - 100, cx + 100, cy + 100)
-            canvas.coords(album_image_id, cx, cy)
-            canvas.coords(btn_prev_text, cx - 33, cy + 55)
-            canvas.coords(btn_toggle_text, cx + 2, cy + 55)
-            canvas.coords(btn_next_text, cx + 37, cy + 55)
-        root.after(16, animate_step)
-    else:
-        current_mode = target_mode
-        if target_mode == 0:
-            cx = screen_w // 2
-            cy = screen_h // 2
-            canvas.coords(drag_area_circle, cx - 100, cy - 100, cx + 100, cy + 100)
-            canvas.coords(album_image_id, cx, cy)
-            canvas.coords(btn_prev_text, cx - 33, cy + 55)
-            canvas.coords(btn_toggle_text, cx + 2, cy + 55)
-            canvas.coords(btn_next_text, cx + 37, cy + 55)
-            canvas.itemconfigure(drag_area_circle, state="normal")
-            canvas.itemconfigure(btn_prev_text, state="normal")
-            canvas.itemconfigure(btn_toggle_text, state="normal")
-            canvas.itemconfigure(btn_next_text, state="normal")
-        is_animating = False
-
-x_offset, y_offset = 0, 0
-click_start_x, click_start_y = 0, 0
-is_dragging = False
-
-def start_move(event):
-    global x_offset, y_offset, click_start_x, click_start_y, is_dragging
-    if current_mode == 0:
-        dist = math.hypot(event.x - cx, event.y - cy)
-        if dist <= 100:
-            click_start_x, click_start_y = event.x, event.y
-            x_offset, y_offset = event.x, event.y
-            is_dragging = False
-    elif current_mode == 4:
-        hx = horiz_start_x - horiz_btn_offset_x
-        hy = horiz_btn_y
-        if abs(event.x - hx) <= 12 and abs(event.y - hy) <= 12:
-            click_start_x, click_start_y = event.x, event.y
-            x_offset, y_offset = event.x, event.y
-            is_dragging = True
-
-def do_move(event):
-    global cx, cy, horiz_start_x, x_offset, y_offset, is_dragging
-    if math.hypot(event.x - click_start_x, event.y - click_start_y) > 4:
-        is_dragging = True
-
-    if is_dragging:
-        dx, dy = event.x - x_offset, event.y - y_offset
-        if current_mode == 0:
-            cx += dx
-            cy += dy
-            max_r = 230
-            cx = max(max_r, min(screen_w - max_r, cx))
-            cy = max(max_r, min(screen_h - max_r, cy))
-            canvas.coords(drag_area_circle, cx - 100, cy - 100, cx + 100, cy + 100)
-            canvas.coords(album_image_id, cx, cy)
-            canvas.coords(btn_prev_text, cx - 33, cy + 55)
-            canvas.coords(btn_toggle_text, cx + 2, cy + 55)
-            canvas.coords(btn_next_text, cx + 37, cy + 55)
-        elif current_mode == 4:
-            horiz_start_x += dx
-            horiz_start_x = max(20, min(screen_w - horiz_length, horiz_start_x))
-            update_horiz_drag_btn_coords()
-        x_offset = event.x
-        y_offset = event.y
-
-def stop_move(event):
-    global is_dragging, is_playing
-    if not is_dragging and current_mode == 0:
-        dist = math.hypot(event.x - cx, event.y - cy)
-        if dist <= 100:
-            rel_x = event.x - cx
-            rel_y = event.y - cy
-            if rel_y > 35:
-                if rel_x < -18:
-                    media_core.control_media("prev")
-                elif rel_x > 18:
-                    media_core.control_media("next")
-                else:
-                    # 修正：只有在「原本應該是播放中但無聲音」時才擋下；如果是手動暫停中(is_playing=False)，允許點擊以恢復播放
-                    if is_playing and not is_audio_active():
-                        is_dragging = False
-                        return
-                    
-                    media_core.control_media("toggle")
-                    is_playing = not is_playing
-                    icon_str = "⏸" if is_playing else "▶"
-                    canvas.itemconfig(btn_toggle_text, text=icon_str)
-    is_dragging = False
-
-def on_mouse_motion(event):
-    if current_mode != 0:
-        return
-    
-    rel_x = event.x - cx
-    rel_y = event.y - cy
-    dist = math.hypot(rel_x, rel_y)
-    
-    theme_color = get_theme_hex()
-
-    if dist <= 100:
-        if rel_y > 35:
-            if rel_x < -18:
-                show_tooltip(event.x, event.y, "上一首")
-                canvas.itemconfig(btn_prev_text, fill=theme_color)
-                canvas.itemconfig(btn_toggle_text, fill="#ffffff")
-                canvas.itemconfig(btn_next_text, fill="#aaaaaa")
-                return
-            elif rel_x > 18:
-                show_tooltip(event.x, event.y, "下一首")
-                canvas.itemconfig(btn_next_text, fill=theme_color)
-                canvas.itemconfig(btn_prev_text, fill="#aaaaaa")
-                canvas.itemconfig(btn_toggle_text, fill="#ffffff")
-                return
-            else:
-                # 修正：只有在播放中且無聲音時提示「目前無音樂」，若為暫停狀態則正常顯示「播放」提示
-                if is_playing and not is_audio_active():
-                    show_tooltip(event.x, event.y, "目前無音樂")
-                else:
-                    tip = "暫停" if is_playing else "播放"
-                    show_tooltip(event.x, event.y, tip)
-                
-                canvas.itemconfig(btn_toggle_text, fill=theme_color)
-                canvas.itemconfig(btn_prev_text, fill="#aaaaaa")
-                canvas.itemconfig(btn_next_text, fill="#aaaaaa")
-                return
-
-    hide_tooltip()
-    reset_button_colors()
-
-def reset_button_colors():
-    canvas.itemconfig(btn_prev_text, fill="#aaaaaa")
-    canvas.itemconfig(btn_toggle_text, fill="#ffffff")
-    canvas.itemconfig(btn_next_text, fill="#aaaaaa")
-
-def show_tooltip(x, y, text):
-    tx = x + 15
-    ty = y + 15
-    canvas.coords(tooltip_text, tx + 25, ty + 12)
-    canvas.itemconfig(tooltip_text, text=text, state="normal")
-    
-    bbox = canvas.bbox(tooltip_text)
-    if bbox:
-        canvas.coords(tooltip_bg, bbox[0]-4, bbox[1]-2, bbox[2]+4, bbox[3]+2)
-        canvas.itemconfig(tooltip_bg, state="normal")
-
-def hide_tooltip():
-    canvas.itemconfig(tooltip_bg, state="hidden")
-    canvas.itemconfig(tooltip_text, state="hidden")
-
-canvas.bind("<Button-1>", start_move)
-canvas.bind("<B1-Motion>", do_move)
-canvas.bind("<ButtonRelease-1>", stop_move)
-canvas.bind("<Motion>", on_mouse_motion)
 
 # 啟動音訊與系統匣背景執行緒
 threading.Thread(target=audio_core.capture_audio_thread, args=(get_is_running,), daemon=True).start()
 threading.Thread(target=tray_icon.run, daemon=True).start()
 
-fft_smooth = np.zeros(NUM_BARS)
-
-def update_ui():
-    global fft_smooth
-
-    windowed = audio_core.audio_buffer * np.hanning(len(audio_core.audio_buffer))
-    fft_data = np.abs(np.fft.rfft(windowed))
-    freqs = np.fft.rfftfreq(len(audio_core.audio_buffer), 1.0 / audio_core.SAMPLE_RATE)
-    freq_points = np.logspace(np.log10(20.0), np.log10(15000.0), NUM_BARS + 1)
-
-    raw_bars = np.zeros(NUM_BARS)
-    for i in range(NUM_BARS):
-        idx_s = np.searchsorted(freqs, freq_points[i])
-        idx_e = max(idx_s + 1, np.searchsorted(freqs, freq_points[i + 1]))
-        bin_val = np.max(fft_data[idx_s:idx_e])
-        t_val = i / (NUM_BARS - 1)
-        comp = (0.4 + (t_val / 0.3) * 0.6) if t_val < 0.3 else (1.0 + ((t_val - 0.3) / 0.7) ** 1.8 * 8.0)
-        raw_bars[i] = bin_val * comp
-
-    smoothed = gaussian_filter1d(raw_bars, sigma=1.1)
-    fft_smooth = fft_smooth * 0.7 + smoothed * 0.3
-
-    for index, rect_id in enumerate(rectangles):
-        val = fft_smooth[index]
-        bar_len = min(130, np.cbrt(val) * sensitivity_factor)
-
-        if current_theme == "green":
-            r = int(min(255, val * 10 + (index / NUM_BARS) * 180))
-            g = int(max(0, 255 - val * 10 - (index / NUM_BARS) * 120))
-            b = int(min(255, 120 + (index / NUM_BARS) * 135))
-        elif current_theme == "cyan":
-            r = int(max(0, 50 - val * 5))
-            g = int(min(255, 150 + val * 8 + (index / NUM_BARS) * 100))
-            b = int(min(255, 200 + val * 5))
-        elif current_theme == "orange":
-            r = int(min(255, 200 + val * 10))
-            g = int(min(255, 100 + val * 5 + (index / NUM_BARS) * 100))
-            b = int(max(0, 50 - val * 5))
-
-        x1_old, y1_old, x2_old, y2_old = get_bar_coords(prev_mode, index, bar_len)
-        x1_new, y1_new, x2_new, y2_new = get_bar_coords(target_mode, index, bar_len)
-
-        x1 = lerp(x1_old, x1_new, anim_progress)
-        y1 = lerp(y1_old, y1_new, anim_progress)
-        x2 = lerp(x2_old, x2_new, anim_progress)
-        y2 = lerp(y2_old, y2_new, anim_progress)
-
-        canvas.coords(rect_id, x1, y1, x2, y2)
-        canvas.itemconfig(rect_id, fill=f"#{r:02x}{g:02x}{b:02x}")
-
-    if current_mode == 4:
-        update_horiz_drag_btn_coords()
-
-    root.after(20, update_ui)
-
-update_ui()
 root.bind("<Escape>", on_closing)
 root.mainloop()
