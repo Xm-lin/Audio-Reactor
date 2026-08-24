@@ -41,11 +41,7 @@ def on_closing():
     root.destroy()
 
 def update_tray_menu():
-    if tray_icon:
-        try:
-            tray_icon.update_menu()
-        except Exception:
-            pass
+    pass
 
 eq_win = EqualizerWindow(
     root, screen_w, screen_h, on_closing, 

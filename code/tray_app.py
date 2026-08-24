@@ -6,6 +6,7 @@ def setup_tray(set_mode_cb, get_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb,
     dc = ImageDraw.Draw(image)
     dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
     
+    # 直接建立選單結構，利用 lambda 與動態參數讓 pystray 每次點開時自動讀取最新狀態
     menu = pystray.Menu(
         pystray.MenuItem("顯示模式", pystray.Menu(
             pystray.MenuItem("圓形互動模式", lambda: set_mode_cb(0), checked=lambda item: get_mode_cb() == 0),
@@ -14,9 +15,9 @@ def setup_tray(set_mode_cb, get_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb,
         )),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("視窗透明度", pystray.Menu(
-            pystray.MenuItem("100% (不透明)", lambda: set_opacity_cb(1.0), checked=lambda item: get_opacity_cb() == 1.0),
-            pystray.MenuItem("80%", lambda: set_opacity_cb(0.8), checked=lambda item: get_opacity_cb() == 0.8),
-            pystray.MenuItem("60%", lambda: set_opacity_cb(0.6), checked=lambda item: get_opacity_cb() == 0.6),
+            pystray.MenuItem("100% (不透明)", lambda: set_opacity_cb(1.0), checked=lambda item: abs(get_opacity_cb() - 1.0) < 0.01),
+            pystray.MenuItem("80%", lambda: set_opacity_cb(0.8), checked=lambda item: abs(get_opacity_cb() - 0.8) < 0.01),
+            pystray.MenuItem("60%", lambda: set_opacity_cb(0.6), checked=lambda item: abs(get_opacity_cb() - 0.6) < 0.01),
         )),
         pystray.MenuItem("靈敏度設定", pystray.Menu(
             pystray.MenuItem("低 (8.0)", lambda: set_sens_cb(8.0), checked=lambda item: get_sens_cb() == 8.0),
@@ -28,6 +29,7 @@ def setup_tray(set_mode_cb, get_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb,
             pystray.MenuItem("霓虹綠 (Classic)", lambda: set_theme_cb("green"), checked=lambda item: get_theme_cb() == "green"),
             pystray.MenuItem("電競藍 (Cyber)", lambda: set_theme_cb("cyan"), checked=lambda item: get_theme_cb() == "cyan"),
             pystray.MenuItem("日落橘 (Sunset)", lambda: set_theme_cb("orange"), checked=lambda item: get_theme_cb() == "orange"),
+            pystray.MenuItem("自訂色調 (Custom)...", lambda: set_theme_cb("custom"), checked=lambda item: get_theme_cb() == "custom"),
         )),
         pystray.MenuItem("音源選擇", pystray.Menu(
             pystray.MenuItem("僅系統聲音 (System)", lambda: set_source_cb("system"), checked=lambda item: get_source_cb() == "system"),
@@ -37,5 +39,6 @@ def setup_tray(set_mode_cb, get_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb,
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("結束程式", lambda icon, item: exit_cb())
     )
-    
-    return pystray.Icon("FFT_Equalizer", image, "系統音訊等化器", menu)
+
+    icon = pystray.Icon("FFT_Equalizer", image, "系統音訊等化器", menu=menu)
+    return icon

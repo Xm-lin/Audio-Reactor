@@ -173,14 +173,17 @@ class EqualizerWindow:
         cx, cy = self.cx, self.cy
         self.drag_area_circle = self.canvas.create_oval(cx - 100, cy - 100, cx + 100, cy + 100, fill="#111111", outline="", width=0)
         self.album_image_id = self.canvas.create_image(cx, cy, state="hidden")
-        self.title_text_id = self.canvas.create_text(cx, cy + 33, text="", fill="#ffffff", font=("JF Open 粉圓", 10, "bold"), state="hidden")
+        
+        # 修正：將字型改為 "Microsoft JhengHei" 以防粉圓字型在系統找不到而失效，並賦予預設文字確保能正常顯示
+        self.title_text_id = self.canvas.create_text(cx, cy + 33, text="播放器準備就緒...", fill="#ffffff", font=("Microsoft JhengHei", 10, "bold"), state="hidden")
 
         self.btn_prev_text   = self.canvas.create_text(cx - 33, cy + 55, text="⏮", fill="#aaaaaa", font=("Arial", 12), state="normal")
         self.btn_toggle_text = self.canvas.create_text(cx + 2,  cy + 55, text="⏸", fill="#ffffff", font=("Arial", 14), state="normal")
         self.btn_next_text   = self.canvas.create_text(cx + 37, cy + 55, text="⏭", fill="#aaaaaa", font=("Arial", 12), state="normal")
 
         self.tooltip_bg = self.canvas.create_rectangle(0, 0, 0, 0, fill="#222222", outline="#555555", state="hidden")
-        self.tooltip_text = self.canvas.create_text(0, 0, text="", fill="#ffffff", font=("JF Open 粉圓", 9), state="hidden")
+        # 提示框文字也一併更換為安全字型
+        self.tooltip_text = self.canvas.create_text(0, 0, text="", fill="#ffffff", font=("Microsoft JhengHei", 9), state="hidden")
 
         self.horiz_btn_offset_x = 18
         self.horiz_btn_y = 17
@@ -323,7 +326,10 @@ class EqualizerWindow:
     def set_mode(self, mode):
         if self.is_animating or self.current_mode == mode: 
             return
+        
+        # 立即更新當前模式狀態，確保系統匣與右鍵選單能同步抓到正確打勾狀態
         self.prev_mode = self.current_mode
+        self.current_mode = mode  # <--- 將這一行移到這裡，點擊後立即生效
         self.target_mode = mode
 
         self.anim_progress = 0.0
@@ -673,7 +679,7 @@ class EqualizerWindow:
         is_playing = getattr(self, 'is_playing', True)
         
         if self.current_mode == 0 and self.full_title:
-            max_chars = 18
+            max_chars = 10
             if len(self.full_title) <= max_chars:
                 self.canvas.itemconfig(self.title_text_id, text=self.full_title)
             else:
@@ -685,6 +691,10 @@ class EqualizerWindow:
                     
                 self.canvas.itemconfig(self.title_text_id, text=display_text[:max_chars])
                 
+            self.canvas.itemconfigure(self.title_text_id, state="normal")
+        elif self.current_mode == 0 and not self.full_title:
+            # 當還沒抓到歌名時，顯示預設提示
+            self.canvas.itemconfig(self.title_text_id, text="等待播放音樂...")
             self.canvas.itemconfigure(self.title_text_id, state="normal")
         else:
             self.canvas.itemconfig(self.title_text_id, text="")
