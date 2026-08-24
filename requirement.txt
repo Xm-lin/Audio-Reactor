@@ -1,5 +1,13 @@
-numpy
-scipy
-soundcard
-pystray
-Pillow
+# Audio Capture and Processing
+soundcard==0.4.3
+numpy==1.26.4
+scipy==1.13.0
+
+# Graphical User Interface (Tkinter is a built-in module, image processing libraries listed below)
+pillow==10.3.0
+
+# System Tray Integration
+pystray==0.19.5
+
+# Windows Media Control and Information Integration (WinRT API)
+winsdk==1.0.0b9
