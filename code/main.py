@@ -6,14 +6,12 @@ import audio_core
 from equalizer_window import EqualizerWindow
 from tray_app import setup_tray
 
-# 濾除 soundcard 的資料斷訊警告
 try:
     import soundcard
     warnings.filterwarnings("ignore", category=soundcard.SoundcardRuntimeWarning)
 except ImportError:
     pass
 
-# --- 初始化 Tkinter 視窗 ---
 root = tk.Tk()
 root.title("雙模式系統音訊 FFT 等化器")
 
@@ -42,24 +40,32 @@ def on_closing():
     root.quit()
     root.destroy()
 
-# 建立等化器 UI 核心物件
-eq_win = EqualizerWindow(root, screen_w, screen_h, on_closing)
+def update_tray_menu():
+    if tray_icon:
+        try:
+            tray_icon.update_menu()
+        except Exception:
+            pass
 
-# 建立系統匣物件
+eq_win = EqualizerWindow(
+    root, screen_w, screen_h, on_closing, 
+    update_tray_cb=update_tray_menu
+)
+
 tray_icon = setup_tray(
-    toggle_mode_cb=eq_win.toggle_mode,
+    set_mode_cb=eq_win.set_mode,
+    get_mode_cb=eq_win.get_mode,
     set_sens_cb=eq_win.set_sensitivity,
     get_sens_cb=eq_win.get_sensitivity,
     set_theme_cb=eq_win.set_theme,
     get_theme_cb=eq_win.get_theme,
     set_source_cb=eq_win.set_audio_source,
     get_source_cb=eq_win.get_audio_source,
-    set_opacity_cb=eq_win.change_opacity,  # 新增這一行
-    get_opacity_cb=eq_win.get_opacity,    # 新增這一行
+    set_opacity_cb=eq_win.change_opacity,
+    get_opacity_cb=eq_win.get_opacity,
     exit_cb=lambda: root.after(0, on_closing)
 )
 
-# 啟動音訊與系統匣背景執行緒
 threading.Thread(target=audio_core.capture_audio_thread, args=(get_is_running,), daemon=True).start()
 threading.Thread(target=tray_icon.run, daemon=True).start()
 

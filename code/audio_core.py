@@ -5,6 +5,8 @@ import time
 SAMPLE_RATE = 44100
 BLOCK_SIZE = 1024
 audio_buffer = np.zeros(BLOCK_SIZE)
+left_audio_buffer = np.zeros(BLOCK_SIZE)
+right_audio_buffer = np.zeros(BLOCK_SIZE)
 
 current_audio_source = "system"
 
@@ -16,7 +18,7 @@ def get_audio_source():
     return current_audio_source
 
 def capture_audio_thread(is_running_cb):
-    global audio_buffer
+    global audio_buffer, left_audio_buffer, right_audio_buffer
     
     active_source = None
     mic_stream = None
@@ -26,6 +28,8 @@ def capture_audio_thread(is_running_cb):
         try:
             source = current_audio_source
             data = np.zeros(BLOCK_SIZE)
+            l_data = np.zeros(BLOCK_SIZE)
+            r_data = np.zeros(BLOCK_SIZE)
             
             # 如果音源改變了，安全關閉舊的串流
             if active_source != source:
@@ -48,10 +52,17 @@ def capture_audio_thread(is_running_cb):
                         sys_stream.__enter__()
                     
                     sys_data = sys_stream.record(numframes=BLOCK_SIZE)
-                    if len(sys_data.shape) > 1:
-                        sys_data = np.mean(sys_data, axis=1)
-                    if len(sys_data) == BLOCK_SIZE:
-                        data += sys_data
+                    if len(sys_data.shape) > 1 and sys_data.shape[1] >= 2:
+                        l_data += sys_data[:, 0]
+                        r_data += sys_data[:, 1]
+                        sys_mono = np.mean(sys_data, axis=1)
+                    else:
+                        flat = sys_data.flatten()
+                        l_data += flat
+                        r_data += flat
+                        sys_mono = flat
+                    if len(sys_mono) == BLOCK_SIZE:
+                        data += sys_mono
                 except Exception:
                     sys_stream = None
 
@@ -67,14 +78,22 @@ def capture_audio_thread(is_running_cb):
                     
                     if mic_stream:
                         mic_data = mic_stream.record(numframes=BLOCK_SIZE)
-                        if len(mic_data.shape) > 1:
-                            mic_data = np.mean(mic_data, axis=1)
-                            
-                        if len(mic_data) == BLOCK_SIZE:
-                            data += mic_data * 25.0
+                        if len(mic_data.shape) > 1 and mic_data.shape[1] >= 2:
+                            l_data += mic_data[:, 0] * 25.0
+                            r_data += mic_data[:, 1] * 25.0
+                            mic_mono = np.mean(mic_data, axis=1) * 25.0
+                        elif len(mic_data) > 0:
+                            flat = mic_data.flatten() * 25.0
+                            l_data += flat
+                            r_data += flat
+                            mic_mono = flat
+                        if len(mic_mono) == BLOCK_SIZE:
+                            data += mic_mono
                 except Exception:
                     mic_stream = None
 
             audio_buffer = data
+            left_audio_buffer = l_data
+            right_audio_buffer = r_data
         except Exception:
             time.sleep(0.1)

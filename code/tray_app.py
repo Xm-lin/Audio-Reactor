@@ -1,13 +1,17 @@
 import pystray
 from PIL import Image, ImageDraw
 
-def setup_tray(toggle_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, set_source_cb, get_source_cb, set_opacity_cb, get_opacity_cb, exit_cb):
+def setup_tray(set_mode_cb, get_mode_cb, set_sens_cb, get_sens_cb, set_theme_cb, get_theme_cb, set_source_cb, get_source_cb, set_opacity_cb, get_opacity_cb, exit_cb):
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     dc.ellipse([16, 16, 48, 48], fill="#00FF7F")
     
     menu = pystray.Menu(
-        pystray.MenuItem("切換顯示模式 (圓形 / 橫向)", lambda icon, item: toggle_mode_cb()),
+        pystray.MenuItem("顯示模式", pystray.Menu(
+            pystray.MenuItem("圓形互動模式", lambda: set_mode_cb(0), checked=lambda item: get_mode_cb() == 0),
+            pystray.MenuItem("橫向頂部模式", lambda: set_mode_cb(4), checked=lambda item: get_mode_cb() == 4),
+            pystray.MenuItem("左右側邊雙聲道模式", lambda: set_mode_cb(5), checked=lambda item: get_mode_cb() == 5),
+        )),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("視窗透明度", pystray.Menu(
             pystray.MenuItem("100% (不透明)", lambda: set_opacity_cb(1.0), checked=lambda item: get_opacity_cb() == 1.0),

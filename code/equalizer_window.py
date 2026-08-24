@@ -1,20 +1,69 @@
 import math
 import threading
 import tkinter as tk
+from tkinter import colorchooser
 import numpy as np
 from PIL import Image, ImageTk, ImageDraw, ImageEnhance
 from scipy.ndimage import gaussian_filter1d
+import json
+import os
 
 import audio_core
 import media_core
 import media_info_core
 
+# 設定檔儲存於 AppData 的路徑邏輯
+APP_NAME = "MyEqualizerApp"
+
+def get_config_path():
+    appdata_dir = os.getenv('APPDATA')
+    if not appdata_dir:
+        appdata_dir = os.path.expanduser("~")
+    target_dir = os.path.join(appdata_dir, APP_NAME)
+    if not os.path.exists(target_dir):
+        try:
+            os.makedirs(target_dir)
+        except Exception:
+            target_dir = appdata_dir
+    return os.path.join(target_dir, "config.json")
+
+def load_config():
+    path = get_config_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_config(config_data):
+    path = get_config_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+
 class EqualizerWindow:
-    def __init__(self, root, screen_w, screen_h, on_closing_cb):
+    def __init__(self, root, screen_w, screen_h, on_closing_cb, update_tray_cb=None):
         self.root = root
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.on_closing_cb = on_closing_cb
+        self.update_tray_cb = update_tray_cb
+
+        # 讀取 AppData 中的設定（涵蓋 5 個核心設定）
+        config = load_config()
+        self.current_mode = config.get("mode", 0)
+        self.target_mode = self.current_mode
+        self.sensitivity_factor = config.get("sensitivity", 14.0)
+        self.current_theme = config.get("theme", "green")
+        self.custom_theme_color = tuple(config.get("custom_color", [0, 255, 127]))
+        self.saved_opacity = config.get("opacity", 1.0)
+        saved_source = config.get("source", "system")
+        audio_core.set_audio_source(saved_source)
 
         self.cx = screen_w // 2
         self.cy = screen_h // 2
@@ -24,17 +73,14 @@ class EqualizerWindow:
 
         self.NUM_BARS = 72
         self.BAR_WIDTH = 2
+        self.NUM_SIDE_BARS = 90
 
-        self.current_mode = 0
-        self.target_mode = 0
         self.anim_progress = 1.0
         self.is_animating = False
         self.prev_mode = 0
 
         self.anim_start_cx = self.cx
         self.anim_start_cy = self.cy
-        self.sensitivity_factor = 14.0
-        self.current_theme = "green"
         self.is_playing = True
 
         self.horiz_length = screen_w / 3
@@ -53,16 +99,44 @@ class EqualizerWindow:
         self.init_context_menu()
         self.bind_events()
 
+        # 套用儲存的透明度
+        self.root.after(100, lambda: self.change_opacity(self.saved_opacity))
+
         self.fft_smooth = np.zeros(self.NUM_BARS)
+        self.left_fft_smooth = np.zeros(self.NUM_SIDE_BARS)
+        self.right_fft_smooth = np.zeros(self.NUM_SIDE_BARS)
+
         self.update_ui()
         self.poll_media_info()
         self.update_marquee()
+
+    def save_current_settings(self):
+        """將 5 個設定儲存至 AppData 內的 config.json"""
+        config = {
+            "mode": self.current_mode,
+            "opacity": self.get_opacity(),
+            "sensitivity": self.sensitivity_factor,
+            "theme": self.current_theme,
+            "custom_color": list(self.custom_theme_color),
+            "source": audio_core.get_audio_source()
+        }
+        save_config(config)
+
+    def notify_tray(self):
+        if self.update_tray_cb:
+            try:
+                self.update_tray_cb()
+            except Exception:
+                pass
 
     def get_theme_hex(self):
         if self.current_theme == "cyan":
             return "#00E5FF"
         elif self.current_theme == "orange":
             return "#FFA500"
+        elif self.current_theme == "custom":
+            r, g, b = self.custom_theme_color
+            return f"#{r:02x}{g:02x}{b:02x}"
         return "#00FF7F"
 
     def is_audio_active(self):
@@ -84,12 +158,21 @@ class EqualizerWindow:
             x1 = self.horiz_start_x + index * spacing
             y1 = self.TOP_MARGIN
             return x1, y1, x1, y1 + bar_length
+        return 0, 0, 0, 0
+
+    def get_side_bar_coords(self, index, left_bar_len, right_bar_len):
+        spacing = self.screen_h / self.NUM_SIDE_BARS
+        y = index * spacing + (spacing / 2)
+        lx1, ly1 = 0, y
+        lx2, ly2 = left_bar_len, y
+        rx1, ry1 = self.screen_w, y
+        rx2, ry2 = self.screen_w - right_bar_len, y
+        return (lx1, ly1, lx2, ly2), (rx1, ry1, rx2, ry2)
 
     def init_ui_elements(self):
         cx, cy = self.cx, self.cy
         self.drag_area_circle = self.canvas.create_oval(cx - 100, cy - 100, cx + 100, cy + 100, fill="#111111", outline="", width=0)
         self.album_image_id = self.canvas.create_image(cx, cy, state="hidden")
-
         self.title_text_id = self.canvas.create_text(cx, cy + 33, text="", fill="#ffffff", font=("JF Open 粉圓", 10, "bold"), state="hidden")
 
         self.btn_prev_text   = self.canvas.create_text(cx - 33, cy + 55, text="⏮", fill="#aaaaaa", font=("Arial", 12), state="normal")
@@ -103,12 +186,44 @@ class EqualizerWindow:
         self.horiz_btn_y = 17
 
         self.horiz_drag_bg = self.canvas.create_oval(0, 0, 0, 0, fill="#1a1a1a", outline="", width=0, state="hidden")
-        self.horiz_arrow_up = self.canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-        self.horiz_arrow_down = self.canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-        self.horiz_arrow_left = self.canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
-        self.horiz_arrow_right = self.canvas.create_line(0, 0, 0, 0, fill="#00FF7F", width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
+        self.horiz_arrow_up = self.canvas.create_line(0, 0, 0, 0, fill=self.get_theme_hex(), width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
+        self.horiz_arrow_down = self.canvas.create_line(0, 0, 0, 0, fill=self.get_theme_hex(), width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
+        self.horiz_arrow_left = self.canvas.create_line(0, 0, 0, 0, fill=self.get_theme_hex(), width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
+        self.horiz_arrow_right = self.canvas.create_line(0, 0, 0, 0, fill=self.get_theme_hex(), width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
 
-        self.rectangles = [self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill="#00FF7F", capstyle="round") for _ in range(self.NUM_BARS)]
+        self.rectangles = [self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill=self.get_theme_hex(), capstyle="round") for _ in range(self.NUM_BARS)]
+        
+        self.left_side_rectangles = [
+            self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill=self.get_theme_hex(), capstyle="round", state="hidden") 
+            for _ in range(self.NUM_SIDE_BARS)
+        ]
+        self.right_side_rectangles = [
+            self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill=self.get_theme_hex(), capstyle="round", state="hidden") 
+            for _ in range(self.NUM_SIDE_BARS)
+        ]
+        
+        # 根據啟動時的模式調整介面可見性
+        if self.current_mode in [4, 5]:
+            self.canvas.itemconfigure(self.drag_area_circle, state="hidden")
+            self.canvas.itemconfigure(self.album_image_id, state="hidden")
+            self.canvas.itemconfigure(self.title_text_id, state="hidden")
+            self.canvas.itemconfigure(self.btn_prev_text, state="hidden")
+            self.canvas.itemconfigure(self.btn_toggle_text, state="hidden")
+            self.canvas.itemconfigure(self.btn_next_text, state="hidden")
+            if self.current_mode == 4:
+                self.update_horiz_drag_btn_coords()
+                self.canvas.itemconfigure(self.horiz_drag_bg, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_up, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
+            elif self.current_mode == 5:
+                for rid in self.left_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="normal")
+                for rid in self.right_side_rectangles:
+                    self.canvas.itemconfigure(rid, state="normal")
+                for rid in self.rectangles:
+                    self.canvas.itemconfigure(rid, state="hidden")
 
     def get_opacity(self):
         try:
@@ -117,47 +232,69 @@ class EqualizerWindow:
             return 1.0
 
     def change_opacity(self, alpha_value):
-        """改變整個視窗的透明度"""
         try:
             self.root.attributes('-alpha', float(alpha_value))
+            self.save_current_settings()
+            self.notify_tray()
         except Exception:
             pass
 
     def init_context_menu(self):
         self.context_menu = tk.Menu(self.root, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-        self.context_menu.add_command(label="切換顯示模式 (圓形 / 橫向)", command=self.toggle_mode)
+        
+        def refresh_menu():
+            self.context_menu.delete(0, tk.END)
+            
+            # 1. 顯示模式
+            mode_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+            modes = [("圓形互動模式", 0), ("橫向頂部模式", 4), ("左右側邊雙聲道模式", 5)]
+            for name, val in modes:
+                label_text = f"{name}    ✓" if self.current_mode == val else name
+                mode_menu.add_command(label=label_text, command=lambda v=val: self.set_mode(v))
+            self.context_menu.add_cascade(label="顯示模式", menu=mode_menu)
 
-        # 透明度右鍵子選單（已縮減為 100%、80%、60%）
-        opacity_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-        opacity_menu.add_command(label="100% (不透明)", command=lambda: self.change_opacity(1.0))
-        opacity_menu.add_command(label="80%", command=lambda: self.change_opacity(0.8))
-        opacity_menu.add_command(label="60%", command=lambda: self.change_opacity(0.6))
-        self.context_menu.add_cascade(label="視窗透明度", menu=opacity_menu)
+            # 2. 視窗透明度
+            opacity_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+            opacities = [("100% (不透明)", 1.0), ("80%", 0.8), ("60%", 0.6)]
+            for name, val in opacities:
+                label_text = f"{name}    ✓" if abs(self.get_opacity() - val) < 0.01 else name
+                opacity_menu.add_command(label=label_text, command=lambda v=val: self.change_opacity(v))
+            self.context_menu.add_cascade(label="視窗透明度", menu=opacity_menu)
 
-        sens_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-        sens_menu.add_command(label="低 (8.0)", command=lambda: self.set_sensitivity(8.0))
-        sens_menu.add_command(label="中 (14.0)", command=lambda: self.set_sensitivity(14.0))
-        sens_menu.add_command(label="高 (22.0)", command=lambda: self.set_sensitivity(22.0))
-        sens_menu.add_command(label="極高 (32.0)", command=lambda: self.set_sensitivity(32.0))
-        self.context_menu.add_cascade(label="靈敏度設定", menu=sens_menu)
+            # 3. 靈敏度設定
+            sens_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+            sens_list = [("低 (8.0)", 8.0), ("中 (14.0)", 14.0), ("高 (22.0)", 22.0), ("極高 (32.0)", 32.0)]
+            for name, val in sens_list:
+                label_text = f"{name}    ✓" if self.sensitivity_factor == val else name
+                sens_menu.add_command(label=label_text, command=lambda v=val: self.set_sensitivity(v))
+            self.context_menu.add_cascade(label="靈敏度設定", menu=sens_menu)
 
-        theme_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-        theme_menu.add_command(label="霓虹綠 (Classic)", command=lambda: self.set_theme("green"))
-        theme_menu.add_command(label="電競藍 (Cyber)", command=lambda: self.set_theme("cyan"))
-        theme_menu.add_command(label="日落橘 (Sunset)", command=lambda: self.set_theme("orange"))
-        self.context_menu.add_cascade(label="主題風格", menu=theme_menu)
+            # 4. 主題風格
+            theme_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+            themes = [("霓虹綠 (Classic)", "green"), ("電競藍 (Cyber)", "cyan"), ("日落橘 (Sunset)", "orange"), ("自訂色調 (Custom)...", "custom")]
+            for name, val in themes:
+                label_text = f"{name}    ✓" if self.current_theme == val else name
+                theme_menu.add_command(label=label_text, command=lambda v=val: self.set_theme(v))
+            self.context_menu.add_cascade(label="主題風格", menu=theme_menu)
 
-        source_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
-        source_menu.add_command(label="僅系統聲音 (System)", command=lambda: self.set_audio_source("system"))
-        source_menu.add_command(label="僅麥克風 (Mic)", command=lambda: self.set_audio_source("mic"))
-        source_menu.add_command(label="混合模式 (Mic & System)", command=lambda: self.set_audio_source("both"))
-        self.context_menu.add_cascade(label="音源選擇", menu=source_menu)
+            # 5. 音源選擇
+            source_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
+            sources = [("僅系統聲音 (System)", "system"), ("僅麥克風 (Mic)", "mic"), ("混合模式 (Mic & System)", "both")]
+            current_src = audio_core.get_audio_source()
+            for name, val in sources:
+                label_text = f"{name}    ✓" if current_src == val else name
+                source_menu.add_command(label=label_text, command=lambda v=val: self.set_audio_source(v))
+            self.context_menu.add_cascade(label="音源選擇", menu=source_menu)
 
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="結束程式", command=self.on_closing_cb)
+            self.context_menu.add_separator()
+            self.context_menu.add_command(label="結束程式", command=self.on_closing_cb)
 
+        refresh_menu()
+        self.refresh_context_menu = refresh_menu
+        
     def show_context_menu(self, event):
         try:
+            self.refresh_context_menu()
             self.context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.context_menu.grab_release()
@@ -183,17 +320,19 @@ class EqualizerWindow:
         self.canvas.coords(self.horiz_arrow_left, hx, hy, hx - 7, hy)
         self.canvas.coords(self.horiz_arrow_right, hx, hy, hx + 7, hy)
 
-    def toggle_mode(self):
-        if self.is_animating: return
+    def set_mode(self, mode):
+        if self.is_animating or self.current_mode == mode: 
+            return
         self.prev_mode = self.current_mode
-        self.target_mode = 4 if self.current_mode == 0 else 0
+        self.target_mode = mode
+
         self.anim_progress = 0.0
         self.is_animating = True
         
         self.anim_start_cx = self.cx
         self.anim_start_cy = self.cy
         
-        if self.target_mode == 4:
+        if self.target_mode in [4, 5]:
             self.canvas.itemconfigure(self.drag_area_circle, state="hidden")
             self.canvas.itemconfigure(self.album_image_id, state="hidden")
             self.canvas.itemconfigure(self.title_text_id, state="hidden")
@@ -202,20 +341,48 @@ class EqualizerWindow:
             self.canvas.itemconfigure(self.btn_next_text, state="hidden")
             self.canvas.itemconfigure(self.tooltip_bg, state="hidden")
             self.canvas.itemconfigure(self.tooltip_text, state="hidden")
-            self.update_horiz_drag_btn_coords()
-            self.canvas.itemconfigure(self.horiz_drag_bg, state="normal")
-            self.canvas.itemconfigure(self.horiz_arrow_up, state="normal")
-            self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
-            self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
-            self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
+            
+            if self.target_mode == 4:
+                self.update_horiz_drag_btn_coords()
+                self.canvas.itemconfigure(self.horiz_drag_bg, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_up, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
+                self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
+            else:
+                self.canvas.itemconfigure(self.horiz_drag_bg, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_up, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_down, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_left, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_right, state="hidden")
         else:
             self.canvas.itemconfigure(self.horiz_drag_bg, state="hidden")
             self.canvas.itemconfigure(self.horiz_arrow_up, state="hidden")
             self.canvas.itemconfigure(self.horiz_arrow_down, state="hidden")
             self.canvas.itemconfigure(self.horiz_arrow_left, state="hidden")
             self.canvas.itemconfigure(self.horiz_arrow_right, state="hidden")
+            for rid in self.left_side_rectangles:
+                self.canvas.itemconfigure(rid, state="hidden")
+            for rid in self.right_side_rectangles:
+                self.canvas.itemconfigure(rid, state="hidden")
+
+        if self.target_mode == 5:
+            for rid in self.left_side_rectangles:
+                self.canvas.itemconfigure(rid, state="normal")
+            for rid in self.right_side_rectangles:
+                self.canvas.itemconfigure(rid, state="normal")
+            for rid in self.rectangles:
+                self.canvas.itemconfigure(rid, state="hidden")
+        else:
+            for rid in self.rectangles:
+                self.canvas.itemconfigure(rid, state="normal")
 
         self.animate_step()
+        self.save_current_settings()
+        self.notify_tray()
+
+    def get_mode(self):
+        return self.current_mode
 
     def animate_step(self):
         if self.anim_progress < 1.0:
@@ -254,23 +421,37 @@ class EqualizerWindow:
 
     def set_sensitivity(self, value):
         self.sensitivity_factor = value
+        self.save_current_settings()
+        self.notify_tray()
 
     def get_sensitivity(self):
         return self.sensitivity_factor
 
     def set_theme(self, theme_name):
-        self.current_theme = theme_name
+        if theme_name == "custom":
+            color_result = colorchooser.askcolor(title="選擇自訂頻譜顏色", initialcolor=self.get_theme_hex())
+            if color_result[0]:
+                self.custom_theme_color = tuple(int(c) for c in color_result[0])
+                self.current_theme = "custom"
+        else:
+            self.current_theme = theme_name
+
         theme_color = self.get_theme_hex()
         self.canvas.itemconfig(self.horiz_arrow_up, fill=theme_color)
         self.canvas.itemconfig(self.horiz_arrow_down, fill=theme_color)
         self.canvas.itemconfig(self.horiz_arrow_left, fill=theme_color)
         self.canvas.itemconfig(self.horiz_arrow_right, fill=theme_color)
+        
+        self.save_current_settings()
+        self.notify_tray()
 
     def get_theme(self):
         return self.current_theme
 
     def set_audio_source(self, source_type):
         audio_core.set_audio_source(source_type)
+        self.save_current_settings()
+        self.notify_tray()
 
     def get_audio_source(self):
         return audio_core.get_audio_source()
@@ -452,7 +633,6 @@ class EqualizerWindow:
                 pil_img = pil_img.crop((left, top, right, bottom))
             
             pil_img = pil_img.resize((190, 190), Image.Resampling.LANCZOS)
-            
             pil_img = ImageEnhance.Color(pil_img).enhance(0.25)
             pil_img = ImageEnhance.Brightness(pil_img).enhance(0.55)
             
@@ -523,57 +703,110 @@ class EqualizerWindow:
             )
             
             cropped = rotated.crop((self.paste_x, self.paste_y, self.paste_x + 190, self.paste_y + 190))
-            
             final_img = Image.new("RGBA", (190, 190), (0, 0, 0, 0))
             final_img.paste(cropped, (0, 0), self.mask)
             
             self.current_image_tk = ImageTk.PhotoImage(final_img)
             self.canvas.itemconfig(self.album_image_id, image=self.current_image_tk)
 
-        windowed = audio_core.audio_buffer * np.hanning(len(audio_core.audio_buffer))
-        fft_data = np.abs(np.fft.rfft(windowed))
-        freqs = np.fft.rfftfreq(len(audio_core.audio_buffer), 1.0 / audio_core.SAMPLE_RATE)
-        freq_points = np.logspace(np.log10(20.0), np.log10(15000.0), self.NUM_BARS + 1)
-
-        raw_bars = np.zeros(self.NUM_BARS)
-        for i in range(self.NUM_BARS):
-            idx_s = np.searchsorted(freqs, freq_points[i])
-            idx_e = max(idx_s + 1, np.searchsorted(freqs, freq_points[i + 1]))
-            bin_val = np.max(fft_data[idx_s:idx_e])
-            t_val = i / (self.NUM_BARS - 1)
-            comp = (0.4 + (t_val / 0.3) * 0.6) if t_val < 0.3 else (1.0 + ((t_val - 0.3) / 0.7) ** 1.8 * 8.0)
-            raw_bars[i] = bin_val * comp
-
-        smoothed = gaussian_filter1d(raw_bars, sigma=1.1)
-        self.fft_smooth = self.fft_smooth * 0.7 + smoothed * 0.3
-
-        for index, rect_id in enumerate(self.rectangles):
-            val = self.fft_smooth[index]
-            bar_len = min(130, np.cbrt(val) * self.sensitivity_factor)
-
+        def get_dynamic_rgb(val, index, total_count):
             if self.current_theme == "green":
-                r = int(min(255, val * 10 + (index / self.NUM_BARS) * 180))
-                g = int(max(0, 255 - val * 10 - (index / self.NUM_BARS) * 120))
-                b = int(min(255, 120 + (index / self.NUM_BARS) * 135))
+                r = int(min(255, val * 10 + (index / total_count) * 180))
+                g = int(max(0, 255 - val * 10 - (index / total_count) * 120))
+                b = int(min(255, 120 + (index / total_count) * 135))
             elif self.current_theme == "cyan":
                 r = int(max(0, 50 - val * 5))
-                g = int(min(255, 150 + val * 8 + (index / self.NUM_BARS) * 100))
+                g = int(min(255, 150 + val * 8 + (index / total_count) * 100))
                 b = int(min(255, 200 + val * 5))
             elif self.current_theme == "orange":
                 r = int(min(255, 200 + val * 10))
-                g = int(min(255, 100 + val * 5 + (index / self.NUM_BARS) * 100))
+                g = int(min(255, 100 + val * 5 + (index / total_count) * 100))
                 b = int(max(0, 50 - val * 5))
+            elif self.current_theme == "custom":
+                cr, cg, cb = self.custom_theme_color
+                r = int(min(255, cr * 0.5 + val * 8 + (index / total_count) * 60))
+                g = int(min(255, cg * 0.5 + val * 8 + (index / total_count) * 60))
+                b = int(min(255, cb * 0.5 + val * 8 + (index / total_count) * 60))
+            else:
+                r, g, b = 0, 255, 127
+            return r, g, b
 
-            x1_old, y1_old, x2_old, y2_old = self.get_bar_coords(self.prev_mode, index, bar_len)
-            x1_new, y1_new, x2_new, y2_new = self.get_bar_coords(self.target_mode, index, bar_len)
+        if self.current_mode == 5:
+            def compute_side_spectrum(buffer):
+                windowed = buffer * np.hanning(len(buffer))
+                fft_data = np.abs(np.fft.rfft(windowed))
+                freqs = np.fft.rfftfreq(len(buffer), 1.0 / audio_core.SAMPLE_RATE)
+                freq_points = np.logspace(np.log10(20.0), np.log10(15000.0), self.NUM_SIDE_BARS + 1)
 
-            x1 = self.lerp(x1_old, x1_new, self.anim_progress)
-            y1 = self.lerp(y1_old, y1_new, self.anim_progress)
-            x2 = self.lerp(x2_old, x2_new, self.anim_progress)
-            y2 = self.lerp(y2_old, y2_new, self.anim_progress)
+                raw_bars = np.zeros(self.NUM_SIDE_BARS)
+                for i in range(self.NUM_SIDE_BARS):
+                    idx_s = np.searchsorted(freqs, freq_points[i])
+                    idx_e = max(idx_s + 1, np.searchsorted(freqs, freq_points[i + 1]))
+                    bin_val = np.max(fft_data[idx_s:idx_e])
+                    t_val = i / (self.NUM_SIDE_BARS - 1)
+                    comp = (0.4 + (t_val / 0.3) * 0.6) if t_val < 0.3 else (1.0 + ((t_val - 0.3) / 0.7) ** 1.8 * 8.0)
+                    raw_bars[i] = bin_val * comp
+                return gaussian_filter1d(raw_bars, sigma=1.1)
 
-            self.canvas.coords(rect_id, x1, y1, x2, y2)
-            self.canvas.itemconfig(rect_id, fill=f"#{r:02x}{g:02x}{b:02x}")
+            left_raw = compute_side_spectrum(audio_core.left_audio_buffer)
+            right_raw = compute_side_spectrum(audio_core.right_audio_buffer)
+
+            self.left_fft_smooth = self.left_fft_smooth * 0.7 + left_raw * 0.3
+            self.right_fft_smooth = self.right_fft_smooth * 0.7 + right_raw * 0.3
+
+            for index in range(self.NUM_SIDE_BARS):
+                l_val = self.left_fft_smooth[index]
+                r_val = self.right_fft_smooth[index]
+                
+                l_bar_len = min(220, np.cbrt(l_val) * self.sensitivity_factor)
+                r_bar_len = min(220, np.cbrt(r_val) * self.sensitivity_factor)
+                if l_bar_len < 3: l_bar_len = 3
+                if r_bar_len < 3: r_bar_len = 3
+
+                l_coords, r_coords = self.get_side_bar_coords(index, l_bar_len, r_bar_len)
+
+                lr, lg, lb = get_dynamic_rgb(l_val, index, self.NUM_SIDE_BARS)
+                rr, rg, rb = get_dynamic_rgb(r_val, index, self.NUM_SIDE_BARS)
+
+                self.canvas.coords(self.left_side_rectangles[index], *l_coords)
+                self.canvas.itemconfig(self.left_side_rectangles[index], fill=f"#{lr:02x}{lg:02x}{lb:02x}")
+
+                self.canvas.coords(self.right_side_rectangles[index], *r_coords)
+                self.canvas.itemconfig(self.right_side_rectangles[index], fill=f"#{rr:02x}{rg:02x}{rb:02x}")
+        else:
+            windowed = audio_core.audio_buffer * np.hanning(len(audio_core.audio_buffer))
+            fft_data = np.abs(np.fft.rfft(windowed))
+            freqs = np.fft.rfftfreq(len(audio_core.audio_buffer), 1.0 / audio_core.SAMPLE_RATE)
+            freq_points = np.logspace(np.log10(20.0), np.log10(15000.0), self.NUM_BARS + 1)
+
+            raw_bars = np.zeros(self.NUM_BARS)
+            for i in range(self.NUM_BARS):
+                idx_s = np.searchsorted(freqs, freq_points[i])
+                idx_e = max(idx_s + 1, np.searchsorted(freqs, freq_points[i + 1]))
+                bin_val = np.max(fft_data[idx_s:idx_e])
+                t_val = i / (self.NUM_BARS - 1)
+                comp = (0.4 + (t_val / 0.3) * 0.6) if t_val < 0.3 else (1.0 + ((t_val - 0.3) / 0.7) ** 1.8 * 8.0)
+                raw_bars[i] = bin_val * comp
+
+            smoothed = gaussian_filter1d(raw_bars, sigma=1.1)
+            self.fft_smooth = self.fft_smooth * 0.7 + smoothed * 0.3
+
+            for index, rect_id in enumerate(self.rectangles):
+                val = self.fft_smooth[index]
+                bar_len = min(130, np.cbrt(val) * self.sensitivity_factor)
+
+                r, g, b = get_dynamic_rgb(val, index, self.NUM_BARS)
+
+                x1_old, y1_old, x2_old, y2_old = self.get_bar_coords(self.prev_mode, index, bar_len)
+                x1_new, y1_new, x2_new, y2_new = self.get_bar_coords(self.target_mode, index, bar_len)
+
+                x1 = self.lerp(x1_old, x1_new, self.anim_progress)
+                y1 = self.lerp(y1_old, y1_new, self.anim_progress)
+                x2 = self.lerp(x2_old, x2_new, self.anim_progress)
+                y2 = self.lerp(y2_old, y2_new, self.anim_progress)
+
+                self.canvas.coords(rect_id, x1, y1, x2, y2)
+                self.canvas.itemconfig(rect_id, fill=f"#{r:02x}{g:02x}{b:02x}")
 
         if self.current_mode == 4:
             self.update_horiz_drag_btn_coords()
