@@ -70,14 +70,14 @@ def capture_audio_thread(is_running_cb):
             if source in ["mic", "both"]:
                 try:
                     if mic_stream is None:
-                        mics = sc.all_microphones()
-                        if len(mics) > 0:
-                            mic_mic = mics[0]
+                        mic_mic = sc.default_microphone()
+                        if mic_mic:
                             mic_stream = mic_mic.recorder(samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
                             mic_stream.__enter__()
                     
                     if mic_stream:
                         mic_data = mic_stream.record(numframes=BLOCK_SIZE)
+                        print("目前麥克風最大音量數值：", np.max(np.abs(mic_data)))
                         if len(mic_data.shape) > 1 and mic_data.shape[1] >= 2:
                             l_data += mic_data[:, 0] * 25.0
                             r_data += mic_data[:, 1] * 25.0
