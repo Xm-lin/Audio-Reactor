@@ -77,7 +77,7 @@ def capture_audio_thread(is_running_cb):
                     
                     if mic_stream:
                         mic_data = mic_stream.record(numframes=BLOCK_SIZE)
-                        print("目前麥克風最大音量數值：", np.max(np.abs(mic_data)))
+                        #print("目前麥克風最大音量數值：", np.max(np.abs(mic_data)))
                         if len(mic_data.shape) > 1 and mic_data.shape[1] >= 2:
                             l_data += mic_data[:, 0] * 25.0
                             r_data += mic_data[:, 1] * 25.0
