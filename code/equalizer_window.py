@@ -210,6 +210,9 @@ class EqualizerWindow:
             self.canvas.itemconfigure(self.btn_prev_text, state="hidden")
             self.canvas.itemconfigure(self.btn_toggle_text, state="hidden")
             self.canvas.itemconfigure(self.btn_next_text, state="hidden")
+            self.canvas.itemconfigure(self.tooltip_bg, state="hidden")
+            self.canvas.itemconfigure(self.tooltip_text, state="hidden")
+            
             if self.current_mode == 4:
                 self.update_horiz_drag_btn_coords()
                 self.canvas.itemconfigure(self.horiz_drag_bg, state="normal")
@@ -217,18 +220,36 @@ class EqualizerWindow:
                 self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
-                # 確保初始化在 4 模式時隱藏側邊條
                 for rid in self.left_side_rectangles:
                     self.canvas.itemconfigure(rid, state="hidden")
                 for rid in self.right_side_rectangles:
                     self.canvas.itemconfigure(rid, state="hidden")
+                for rid in self.rectangles:
+                    self.canvas.itemconfigure(rid, state="normal")
             elif self.current_mode == 5:
+                self.canvas.itemconfigure(self.horiz_drag_bg, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_up, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_down, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_left, state="hidden")
+                self.canvas.itemconfigure(self.horiz_arrow_right, state="hidden")
                 for rid in self.left_side_rectangles:
                     self.canvas.itemconfigure(rid, state="normal")
                 for rid in self.right_side_rectangles:
                     self.canvas.itemconfigure(rid, state="normal")
                 for rid in self.rectangles:
                     self.canvas.itemconfigure(rid, state="hidden")
+        else:
+            self.canvas.itemconfigure(self.horiz_drag_bg, state="hidden")
+            self.canvas.itemconfigure(self.horiz_arrow_up, state="hidden")
+            self.canvas.itemconfigure(self.horiz_arrow_down, state="hidden")
+            self.canvas.itemconfigure(self.horiz_arrow_left, state="hidden")
+            self.canvas.itemconfigure(self.horiz_arrow_right, state="hidden")
+            for rid in self.left_side_rectangles:
+                self.canvas.itemconfigure(rid, state="hidden")
+            for rid in self.right_side_rectangles:
+                self.canvas.itemconfigure(rid, state="hidden")
+            for rid in self.rectangles:
+                self.canvas.itemconfigure(rid, state="normal")
 
     def get_opacity(self):
         try:
@@ -250,7 +271,6 @@ class EqualizerWindow:
         def refresh_menu():
             self.context_menu.delete(0, tk.END)
             
-            # 1. 顯示模式
             mode_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             modes = [("圓形互動模式", 0), ("橫向頂部模式", 4), ("左右側邊雙聲道模式", 5)]
             for name, val in modes:
@@ -258,7 +278,6 @@ class EqualizerWindow:
                 mode_menu.add_command(label=label_text, command=lambda v=val: self.set_mode(v))
             self.context_menu.add_cascade(label="顯示模式", menu=mode_menu)
 
-            # 2. 視窗透明度
             opacity_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             opacities = [("100% (不透明)", 1.0), ("80%", 0.8), ("60%", 0.6)]
             for name, val in opacities:
@@ -266,7 +285,6 @@ class EqualizerWindow:
                 opacity_menu.add_command(label=label_text, command=lambda v=val: self.change_opacity(v))
             self.context_menu.add_cascade(label="視窗透明度", menu=opacity_menu)
 
-            # 3. 靈敏度設定
             sens_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             sens_list = [("低 (8.0)", 8.0), ("中 (14.0)", 14.0), ("高 (22.0)", 22.0), ("極高 (32.0)", 32.0)]
             for name, val in sens_list:
@@ -274,7 +292,6 @@ class EqualizerWindow:
                 sens_menu.add_command(label=label_text, command=lambda v=val: self.set_sensitivity(v))
             self.context_menu.add_cascade(label="靈敏度設定", menu=sens_menu)
 
-            # 4. 主題風格
             theme_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             themes = [("霓虹綠 (Classic)", "green"), ("電競藍 (Cyber)", "cyan"), ("日落橘 (Sunset)", "orange"), ("自訂色調 (Custom)...", "custom")]
             for name, val in themes:
@@ -282,7 +299,6 @@ class EqualizerWindow:
                 theme_menu.add_command(label=label_text, command=lambda v=val: self.set_theme(v))
             self.context_menu.add_cascade(label="主題風格", menu=theme_menu)
 
-            # 5. 音源選擇
             source_menu = tk.Menu(self.context_menu, tearoff=0, bg="#222222", fg="#ffffff", activebackground="#00FF7F", activeforeground="#000000")
             sources = [("僅系統聲音 (System)", "system"), ("僅麥克風 (Mic)", "mic"), ("混合模式 (Mic & System)", "both")]
             current_src = audio_core.get_audio_source()
@@ -331,6 +347,7 @@ class EqualizerWindow:
         
         self.prev_mode = self.current_mode
         self.target_mode = mode
+        self.current_mode = mode  # 立即同步目前模式
 
         self.anim_progress = 0.0
         self.is_animating = True
@@ -355,7 +372,6 @@ class EqualizerWindow:
                 self.canvas.itemconfigure(self.horiz_arrow_down, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_left, state="normal")
                 self.canvas.itemconfigure(self.horiz_arrow_right, state="normal")
-                # 確保切到橫向模式時，強制隱藏左右側邊條
                 for rid in self.left_side_rectangles:
                     self.canvas.itemconfigure(rid, state="hidden")
                 for rid in self.right_side_rectangles:
@@ -390,7 +406,7 @@ class EqualizerWindow:
 
         self.animate_step()
         self.save_current_settings()
-        self.notify_tray()
+        self.notify_tray() # 強制即時通知系統匣更新勾選狀態
 
     def get_mode(self):
         return self.current_mode
