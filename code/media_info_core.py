@@ -4,10 +4,10 @@ from io import BytesIO
 from PIL import Image
 
 # 使用驗證成功的 winsdk 模組
-from winsdk.windows.media.control import (
+from winsdk.windows.media.control import (# type: ignore
     GlobalSystemMediaTransportControlsSessionManager as MediaManager
 )
-from winsdk.windows.storage.streams import (
+from winsdk.windows.storage.streams import ( # type: ignore
     DataReader,
     Buffer,
     InputStreamOptions
