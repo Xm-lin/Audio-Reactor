@@ -193,7 +193,12 @@ class EqualizerWindow:
         self.horiz_arrow_right = self.canvas.create_line(0, 0, 0, 0, fill=self.get_theme_hex(), width=1.5, arrow=tk.LAST, arrowshape=(4, 5, 3), state="hidden")
 
         self.rectangles = [self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill=self.get_theme_hex(), capstyle="round") for _ in range(self.NUM_BARS)]
-        
+
+        self.vol_toast_bg = self.canvas.create_rectangle(0, 0, 0, 0, fill="#1e1e1e", outline="#333333", state="hidden")
+        self.vol_toast_text = self.canvas.create_text(0, 0, text="", fill="#ffffff", font=("Microsoft JhengHei", 10, "bold"), state="hidden")
+        self.vol_toast_alpha = 0.0
+        self.vol_fade_job = None
+
         self.left_side_rectangles = [
             self.canvas.create_line(0, 0, 0, 0, width=self.BAR_WIDTH, fill=self.get_theme_hex(), capstyle="round", state="hidden") 
             for _ in range(self.NUM_SIDE_BARS)
@@ -250,6 +255,52 @@ class EqualizerWindow:
                 self.canvas.itemconfigure(rid, state="hidden")
             for rid in self.rectangles:
                 self.canvas.itemconfigure(rid, state="normal")
+
+    def show_volume_toast(self, x, y, vol_percentage):
+        """在滑鼠右側顯示音量百分比並啟動淡出動畫"""
+        # 計算滑鼠右側偏向位置
+        tx = x + 20
+        ty = y - 10
+        
+        # 顯示文字（範例：音量 70%）
+        display_text = f"音量 {vol_percentage}%" if vol_percentage is not None else "音量調整"
+        
+        self.canvas.coords(self.vol_toast_text, tx + 35, ty + 12)
+        self.canvas.itemconfig(self.vol_toast_text, text=display_text, fill="#ffffff", state="normal")
+        
+        bbox = self.canvas.bbox(self.vol_toast_text)
+        if bbox:
+            self.canvas.coords(self.vol_toast_bg, bbox[0] - 6, bbox[1] - 4, bbox[2] + 6, bbox[3] + 4)
+            self.canvas.itemconfig(self.vol_toast_bg, fill="#1e1e1e", outline=self.get_theme_hex(), state="normal")
+
+        # 取消上一次尚未完成的淡出任務
+        if self.vol_fade_job:
+            self.root.after_cancel(self.vol_fade_job)
+            self.vol_fade_job = None
+
+        # 設定不透明度為滿格，並在 500ms 後開始漸變淡出
+        self.vol_toast_alpha = 1.0
+        self.vol_fade_job = self.root.after(500, self._fade_volume_toast)
+
+    def _fade_volume_toast(self):
+        """遞減顏色亮度實現 Smooth Fade-out 淡出效果"""
+        self.vol_toast_alpha -= 0.1
+        if self.vol_toast_alpha <= 0.0:
+            self.canvas.itemconfig(self.vol_toast_bg, state="hidden")
+            self.canvas.itemconfig(self.vol_toast_text, state="hidden")
+            self.vol_fade_job = None
+        else:
+            # 計算淡出時的顏色值
+            val = int(255 * self.vol_toast_alpha)
+            hex_color = f"#{val:02x}{val:02x}{val:02x}"
+            bg_val = int(30 * self.vol_toast_alpha)
+            hex_bg = f"#{bg_val:02x}{bg_val:02x}{bg_val:02x}"
+            
+            self.canvas.itemconfig(self.vol_toast_text, fill=hex_color)
+            self.canvas.itemconfig(self.vol_toast_bg, fill=hex_bg, outline=hex_color)
+            
+            # 每 30 毫秒更新一次淡出幀
+            self.vol_fade_job = self.root.after(30, self._fade_volume_toast)
 
     def get_opacity(self):
         try:
@@ -327,6 +378,36 @@ class EqualizerWindow:
         self.canvas.bind("<B1-Motion>", self.do_move)
         self.canvas.bind("<ButtonRelease-1>", self.stop_move)
         self.canvas.bind("<Motion>", self.on_mouse_motion)
+        self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
+        self.canvas.bind("<Button-4>", self.on_mouse_wheel)
+        self.canvas.bind("<Button-5>", self.on_mouse_wheel)
+
+    def on_mouse_wheel(self, event):
+        """處理滑鼠滾輪調整音量"""
+        # 在圓形模式下，限制僅在圓形區域（半徑 100 像素）內滾動時觸發
+        if self.current_mode == 0:
+            dist = math.hypot(event.x - self.cx, event.y - self.cy)
+            if dist > 100:
+                return
+
+        # 判斷滾輪滾動方向
+        is_up = False
+        if event.num == 4:
+            is_up = True
+        elif event.num == 5:
+            is_up = False
+        elif hasattr(event, 'delta') and event.delta != 0:
+            is_up = event.delta > 0
+
+        # 發送音量控制按鍵指令
+        if is_up:
+            media_core.control_media("volume_up")
+        else:
+            media_core.control_media("volume_down")
+
+        # 取得當前音量並在滑鼠右側顯示淡出提示
+        current_vol = media_core.get_system_volume()
+        self.show_volume_toast(event.x, event.y, current_vol)
 
     def lerp(self, a, b, t):
         return a + (b - a) * t
