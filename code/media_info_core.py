@@ -1,16 +1,29 @@
 import asyncio
+import threading
 from io import BytesIO
 from PIL import Image
-from winrt.windows.media.control import (
+
+# 使用驗證成功的 winsdk 模組
+from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager as MediaManager
 )
-from winrt.windows.storage.streams import (
+from winsdk.windows.storage.streams import (
     DataReader,
     Buffer,
     InputStreamOptions
 )
 
-async def get_media_info_async():
+# 建立獨立專用 Event Loop 避免背景 API 鎖死
+_loop = asyncio.new_event_loop()
+
+def _start_async_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+_thread = threading.Thread(target=_start_async_loop, args=(_loop,), daemon=True)
+_thread.start()
+
+async def _get_media_info_internal():
     try:
         sessions = await MediaManager.request_async()
         current_session = sessions.get_current_session()
@@ -20,12 +33,11 @@ async def get_media_info_async():
 
         info = await current_session.try_get_media_properties_async()
         
-        # --- 新增：讀取系統真實的播放/暫停狀態 ---
+        # 讀取系統播放狀態 (4 代表 Playing)
         playback_info = current_session.get_playback_info()
-        # 狀態碼 4 代表正在播放中 (Playing)
         is_playing = (playback_info.playback_status == 4) if playback_info else False
         
-        # 讀取封面照片（若有的話）
+        # 讀取專輯封面
         image_obj = None
         thumb_stream_ref = info.thumbnail
         if thumb_stream_ref is not None:
@@ -42,7 +54,6 @@ async def get_media_info_async():
                 image_bytes = bytearray(size)
                 reader.read_bytes(image_bytes)
                 
-                # 轉換為 Pillow 圖片物件
                 image_obj = Image.open(BytesIO(image_bytes))
             except Exception:
                 image_obj = None
@@ -51,15 +62,16 @@ async def get_media_info_async():
             "title": info.title,
             "artist": info.artist,
             "image": image_obj,
-            "is_playing": is_playing  # 將真實狀態回傳給 UI
+            "is_playing": is_playing
         }
     except Exception:
         return None
 
 def get_media_info():
-    """同步包裝函式，讓主執行緒或背景執行緒可以輕鬆呼叫"""
+    """提供同步 call 介面給 UI 使用"""
     try:
-        return asyncio.run(get_media_info_async())
+        future = asyncio.run_coroutine_threadsafe(_get_media_info_internal(), _loop)
+        return future.result(timeout=2.0)
     except Exception:
         return None
 
